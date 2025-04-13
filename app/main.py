@@ -8,10 +8,25 @@ import streamlit as st
 from fpdf import FPDF
 from urllib.parse import quote_plus
 from googletrans import Translator
+import gdown
 
 # Paths
 working_dir = os.path.dirname(os.path.abspath(__file__))
-model_path = os.path.join(working_dir, "trained_model", "plant_disease_prediction_model.h5")
+
+# Google Drive model setup
+def download_model_from_drive():
+    file_id = "1OtAJkrIbOgpST3nSixOj1_z-MSplTIO8"  # 🔁 Replace with your actual file ID
+    url = f"https://drive.google.com/uc?id={file_id}"
+    model_path = os.path.join(working_dir, "trained_model", "plant_disease_prediction_model.h5")
+
+    if not os.path.exists(model_path):
+        os.makedirs(os.path.dirname(model_path), exist_ok=True)
+        st.info("📥 Downloading model from Google Drive...")
+        gdown.download(url, model_path, quiet=False)
+
+    return model_path
+
+model_path = download_model_from_drive()
 model = tf.keras.models.load_model(model_path)
 class_indices = json.load(open(os.path.join(working_dir, "class_indices.json")))
 
@@ -28,7 +43,6 @@ language_map = {
     "മലയാളം": ("ml", "NotoSansMalayalam.ttf")
 }
 
-
 # Image preprocessing
 def load_and_preprocess_image(image_path, target_size=(224, 224)):
     img = Image.open(image_path)
@@ -38,14 +52,12 @@ def load_and_preprocess_image(image_path, target_size=(224, 224)):
     img_array = img_array.astype('float32') / 255.
     return img_array
 
-
 # Prediction
 def predict_image_class(model, image_path, class_indices):
     preprocessed_img = load_and_preprocess_image(image_path)
     predictions = model.predict(preprocessed_img)
     predicted_class_index = np.argmax(predictions, axis=1)[0]
     return class_indices[str(predicted_class_index)]
-
 
 # AI explanation
 def get_disease_explanation(disease_name):
@@ -67,7 +79,6 @@ def get_disease_explanation(disease_name):
         return output[first_bullet_index:].strip() if first_bullet_index != -1 else output.strip()
     return f"❌ Error fetching AI response: {response.status_code} - {response.text}"
 
-
 # PDF generation
 def generate_pdf(prediction, advice_text, language_code, font_filename):
     translator = Translator()
@@ -85,7 +96,6 @@ def generate_pdf(prediction, advice_text, language_code, font_filename):
     pdf_path = os.path.join(working_dir, "ai_advice.pdf")
     pdf.output(pdf_path)
     return pdf_path, prediction, advice_text
-
 
 # Streamlit UI
 st.set_page_config(page_title="🌿 Smart Crop Disease Assistant", layout="centered")
@@ -140,3 +150,4 @@ if uploaded_image is not None:
         encoded_message = quote_plus(message)
         whatsapp_url = f"https://wa.me/?text={encoded_message}"
         st.markdown(f"[📱 Share on WhatsApp]({whatsapp_url})", unsafe_allow_html=True)
+
