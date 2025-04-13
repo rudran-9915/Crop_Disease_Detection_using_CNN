@@ -13,10 +13,9 @@ import gdown
 # Paths
 working_dir = os.path.dirname(os.path.abspath(__file__))
 
-
 # Google Drive model setup
 def download_model_from_drive():
-    file_id = "1OtAJkrIbOgpST3nSixOj1_z-MSplTIO8"  # 🔁 Replace with your actual file ID
+    file_id = "1OtAJkrIbOgpST3nSixOj1_z-MSplTIO8"  # Replace with your actual file ID
     url = f"https://drive.google.com/uc?id={file_id}"
     model_path = os.path.join(working_dir, "trained_model", "plant_disease_prediction_model.h5")
 
@@ -26,7 +25,6 @@ def download_model_from_drive():
         gdown.download(url, model_path, quiet=False)
 
     return model_path
-
 
 model_path = download_model_from_drive()
 model = tf.keras.models.load_model(model_path)
@@ -45,7 +43,6 @@ language_map = {
     "മലയാളം": ("ml", "NotoSansMalayalam.ttf")
 }
 
-
 # Image preprocessing
 def load_and_preprocess_image(image_path, target_size=(224, 224)):
     img = Image.open(image_path)
@@ -55,14 +52,12 @@ def load_and_preprocess_image(image_path, target_size=(224, 224)):
     img_array = img_array.astype('float32') / 255.
     return img_array
 
-
 # Prediction
 def predict_image_class(model, image_path, class_indices):
     preprocessed_img = load_and_preprocess_image(image_path)
     predictions = model.predict(preprocessed_img)
     predicted_class_index = np.argmax(predictions, axis=1)[0]
     return class_indices[str(predicted_class_index)]
-
 
 # AI explanation
 def get_disease_explanation(disease_name):
@@ -84,45 +79,42 @@ def get_disease_explanation(disease_name):
         return output[first_bullet_index:].strip() if first_bullet_index != -1 else output.strip()
     return f"❌ Error fetching AI response: {response.status_code} - {response.text}"
 
-
-# PDF generation
+# PDF generation with dual fonts
 def generate_pdf(prediction, advice_text, language_code, font_filename):
-    # Initialize the translator
     translator = Translator()
-
-    # Translate the prediction and advice if the selected language is not English
     if language_code != 'en':
         prediction = translator.translate(prediction, dest=language_code).text
         advice_text = translator.translate(advice_text, dest=language_code).text
 
-    # Ensure the font path is correct in the Streamlit environment
-    font_path = os.path.join(working_dir, "fonts", font_filename)
-
-    # Check if font file exists
-    if not os.path.exists(font_path):
-        st.error(f"Font file '{font_filename}' not found. Please make sure the file is included in the app.")
-        return None, None, None
-
-    # Initialize PDF with custom font
     pdf = FPDF()
     pdf.add_page()
 
-    try:
-        pdf.add_font("CustomFont", "", font_path, uni=True)  # Add the custom font
-        pdf.set_font("CustomFont", size=12)
-    except Exception as e:
-        st.error(f"Error loading font: {e}")
+    universal_font_path = os.path.join(working_dir, "fonts", "DejaVuSans.ttf")
+    regional_font_path = os.path.join(working_dir, "fonts", font_filename)
+
+    if not os.path.isfile(universal_font_path):
+        st.error("Missing universal font: DejaVuSans.ttf")
         return None, None, None
 
-    # Add prediction and advice to the PDF
-    pdf.multi_cell(0, 10, f"\U0001f33e Predicted Disease: {prediction}\n\n{advice_text}")
+    if not os.path.isfile(regional_font_path):
+        st.error(f"Missing selected language font: {font_filename}")
+        return None, None, None
 
-    # Output the PDF to the given path
+    # Register both fonts
+    pdf.add_font("Universal", "", universal_font_path, uni=True)
+    pdf.add_font("CustomFont", "", regional_font_path, uni=True)
+
+    # First write the header (emoji safe)
+    pdf.set_font("Universal", size=14)
+    pdf.multi_cell(0, 10, f"🌾 Predicted Disease: {prediction}\n\n")
+
+    # Then write the translated advice using the regional font
+    pdf.set_font("CustomFont", size=12)
+    pdf.multi_cell(0, 10, advice_text)
+
     pdf_path = os.path.join(working_dir, "ai_advice.pdf")
     pdf.output(pdf_path)
-
     return pdf_path, prediction, advice_text
-
 
 # Streamlit UI
 st.set_page_config(page_title="🌿 Smart Crop Disease Assistant", layout="centered")
@@ -157,7 +149,6 @@ if uploaded_image is not None:
         st.markdown("---")
         st.markdown("### 🤖 AI-Generated Cure & Advice")
 
-        # Translate for display if needed
         if selected_lang_code != 'en':
             translator = Translator()
             ai_explanation = translator.translate(ai_explanation, dest=selected_lang_code).text
@@ -165,7 +156,7 @@ if uploaded_image is not None:
 
         st.markdown(ai_explanation)
 
-        # Generate & Download PDF
+        # Generate PDF with new safe font logic
         pdf_path, translated_pred, translated_adv = generate_pdf(
             prediction, ai_explanation, selected_lang_code, font_file
         )
@@ -173,8 +164,8 @@ if uploaded_image is not None:
             with open(pdf_path, "rb") as file:
                 st.download_button("📄 Download as PDF", file, file_name="plant_disease_advice.pdf")
 
-        # WhatsApp Share
-        message = f"🌾 Plant Disease Info\n\n🧬 Prediction: {translated_pred}\n\n{translated_adv}"
-        encoded_message = quote_plus(message)
-        whatsapp_url = f"https://wa.me/?text={encoded_message}"
-        st.markdown(f"[📱 Share on WhatsApp]({whatsapp_url})", unsafe_allow_html=True)
+            # WhatsApp Share
+            message = f"🌾 Plant Disease Info\n\n🧬 Prediction: {translated_pred}\n\n{translated_adv}"
+            encoded_message = quote_plus(message)
+            whatsapp_url = f"https://wa.me/?text={encoded_message}"
+            st.markdown(f"[📱 Share on WhatsApp]({whatsapp_url})", unsafe_allow_html=True)
