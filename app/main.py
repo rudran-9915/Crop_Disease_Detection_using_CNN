@@ -9,6 +9,22 @@ from fpdf import FPDF
 from urllib.parse import quote_plus
 from googletrans import Translator
 import gdown
+import re
+
+# --- Utility to Remove Emojis --- #
+def remove_emojis(text):
+    emoji_pattern = re.compile(
+        "["
+        u"\U0001F600-\U0001F64F"  # emoticons
+        u"\U0001F300-\U0001F5FF"  # symbols & pictographs
+        u"\U0001F680-\U0001F6FF"  # transport & map symbols
+        u"\U0001F1E0-\U0001F1FF"  # flags
+        u"\U00002700-\U000027BF"  # dingbats
+        u"\U0001F900-\U0001F9FF"  # Supplemental Symbols and Pictographs
+        u"\U00002600-\U000026FF"  # Miscellaneous Symbols
+        "]+", flags=re.UNICODE
+    )
+    return emoji_pattern.sub(r'', text)
 
 # Paths
 working_dir = os.path.dirname(os.path.abspath(__file__))
@@ -73,44 +89,34 @@ def get_disease_explanation(disease_name):
     headers = {"Authorization": f"Bearer {HUGGINGFACE_API_TOKEN}"}
     payload = {"inputs": prompt}
     response = requests.post(HF_API_URL, headers=headers, json=payload)
+
     if response.status_code == 200:
         output = response.json()[0]["generated_text"]
         first_bullet_index = output.find("🤠")
         return output[first_bullet_index:].strip() if first_bullet_index != -1 else output.strip()
     return f"❌ Error fetching AI response: {response.status_code} - {response.text}"
 
-# PDF generation with dual fonts
+# PDF generation
 def generate_pdf(prediction, advice_text, language_code, font_filename):
     translator = Translator()
     if language_code != 'en':
         prediction = translator.translate(prediction, dest=language_code).text
         advice_text = translator.translate(advice_text, dest=language_code).text
 
+    prediction = remove_emojis(prediction)
+    advice_text = remove_emojis(advice_text)
+
+    font_path = os.path.join(working_dir, "fonts", font_filename)
     pdf = FPDF()
     pdf.add_page()
 
-    universal_font_path = os.path.join(working_dir, "fonts", "DejaVuSans.ttf")
-    regional_font_path = os.path.join(working_dir, "fonts", font_filename)
-
-    if not os.path.isfile(universal_font_path):
-        st.error("Missing universal font: DejaVuSans.ttf")
-        return None, None, None
-
-    if not os.path.isfile(regional_font_path):
-        st.error(f"Missing selected language font: {font_filename}")
-        return None, None, None
-
-    # Register both fonts
-    pdf.add_font("Universal", "", universal_font_path, uni=True)
-    pdf.add_font("CustomFont", "", regional_font_path, uni=True)
-
-    # First write the header (emoji safe)
-    pdf.set_font("Universal", size=14)
-    pdf.multi_cell(0, 10, f"🌾 Predicted Disease: {prediction}\n\n")
-
-    # Then write the translated advice using the regional font
-    pdf.set_font("CustomFont", size=12)
-    pdf.multi_cell(0, 10, advice_text)
+    try:
+        pdf.add_font("CustomFont", "", font_path, uni=True)
+        pdf.set_font("CustomFont", size=12)
+        pdf.multi_cell(0, 10, f"Predicted Disease: {prediction}\n\n{advice_text}")
+    except Exception as e:
+        pdf.set_font("Arial", size=12)
+        pdf.multi_cell(0, 10, f"Font Error! Showing plain text:\n\nPredicted Disease: {prediction}\n\n{advice_text}")
 
     pdf_path = os.path.join(working_dir, "ai_advice.pdf")
     pdf.output(pdf_path)
@@ -149,23 +155,26 @@ if uploaded_image is not None:
         st.markdown("---")
         st.markdown("### 🤖 AI-Generated Cure & Advice")
 
+        display_prediction = prediction
+        display_advice = ai_explanation
+
+        # Translate for UI if needed
         if selected_lang_code != 'en':
             translator = Translator()
-            ai_explanation = translator.translate(ai_explanation, dest=selected_lang_code).text
-            prediction = translator.translate(prediction, dest=selected_lang_code).text
+            display_prediction = translator.translate(prediction, dest=selected_lang_code).text
+            display_advice = translator.translate(ai_explanation, dest=selected_lang_code).text
 
-        st.markdown(ai_explanation)
+        st.markdown(display_advice)
 
-        # Generate PDF with new safe font logic
+        # Generate & Download PDF
         pdf_path, translated_pred, translated_adv = generate_pdf(
             prediction, ai_explanation, selected_lang_code, font_file
         )
-        if pdf_path:
-            with open(pdf_path, "rb") as file:
-                st.download_button("📄 Download as PDF", file, file_name="plant_disease_advice.pdf")
+        with open(pdf_path, "rb") as file:
+            st.download_button("📄 Download as PDF", file, file_name="plant_disease_advice.pdf")
 
-            # WhatsApp Share
-            message = f"🌾 Plant Disease Info\n\n🧬 Prediction: {translated_pred}\n\n{translated_adv}"
-            encoded_message = quote_plus(message)
-            whatsapp_url = f"https://wa.me/?text={encoded_message}"
-            st.markdown(f"[📱 Share on WhatsApp]({whatsapp_url})", unsafe_allow_html=True)
+        # WhatsApp Share
+        message = f"🌾 Plant Disease Info\n\n🧬 Prediction: {translated_pred}\n\n{translated_adv}"
+        encoded_message = quote_plus(message)
+        whatsapp_url = f"https://wa.me/?text={encoded_message}"
+        st.markdown(f"[📱 Share on WhatsApp]({whatsapp_url})", unsafe_allow_html=True)
